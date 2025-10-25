@@ -9,6 +9,9 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Shetabit\Multipay\Invoice;
+use Shetabit\Payment\Facade\Payment;
+use Shetabit\Multipay\Exceptions\InvalidPaymentException;
 
 class PayController extends Controller
 {
@@ -69,40 +72,67 @@ class PayController extends Controller
     // 💳 تسویه حساب (پرداخت)
     public function checkout()
     {
-        $cart = Cart::where('user_id', Auth::id())->with('items.product')->first();
+        // Do all things together in a single line.
+        return Payment::callbackUrl(route('verify'))->purchase(
+            (new Invoice)->amount(1000),
+            function($driver, $transactionId) {
+                session()->put('re' , $transactionId);
+            }
+        )->pay()->render();
+//        $cart = Cart::where('user_id', Auth::id())->with('items.product')->first();
+//
+//        if (!$cart || $cart->items->isEmpty()) {
+//            return redirect()->back()->with('error', 'سبد خرید شما خالی است 🛒');
+//        }
+//
+//        // 1. محاسبه مبلغ کل
+//        $total = 0;
+//        foreach ($cart->items as $item) {
+//            $total += $item->product->price * $item->quantity;
+//        }
+//
+//        // 2. ساخت سفارش جدید
+//        $order = Order::create([
+//            'user_id' => Auth::id(),
+//            'total' => $total,
+//            'status' => 'pending', // بعداً می‌تونه paid بشه
+//        ]);
+//
+//        // 3. کپی کردن آیتم‌ها از CartItem به OrderItem
+//        foreach ($cart->items as $item) {
+//            OrderItem::create([
+//                'order_id' => $order->id,
+//                'product_id' => $item->product_id,
+//                'quantity' => $item->quantity,
+//                'price' => $item->product->price,
+//            ]);
+//        }
+//
+//        // 4. حذف آیتم‌های سبد خرید و خود سبد
+//        $cart->items()->delete();
+//        $cart->delete();
+//
+//        return redirect()->route('orders.show', $order->id)
+//            ->with('success', 'سفارش شما با موفقیت ثبت شد ✅');
+    }
+    public function verify()
+    {
+        $transactionId = session('re');
+        try {
 
-        if (!$cart || $cart->items->isEmpty()) {
-            return redirect()->back()->with('error', 'سبد خرید شما خالی است 🛒');
+            $receipt = Payment::amount(1000)->transactionId($transactionId)->verify();
+
+            // You can show payment referenceId to the user.
+            echo $receipt->getReferenceId();
+
+
+        } catch (InvalidPaymentException $exception) {
+            /**
+            when payment is not verified, it will throw an exception.
+            We can catch the exception to handle invalid payments.
+            getMessage method, returns a suitable message that can be used in user interface.
+             **/
+            echo $exception->getMessage();
         }
-
-        // 1. محاسبه مبلغ کل
-        $total = 0;
-        foreach ($cart->items as $item) {
-            $total += $item->product->price * $item->quantity;
-        }
-
-        // 2. ساخت سفارش جدید
-        $order = Order::create([
-            'user_id' => Auth::id(),
-            'total' => $total,
-            'status' => 'pending', // بعداً می‌تونه paid بشه
-        ]);
-
-        // 3. کپی کردن آیتم‌ها از CartItem به OrderItem
-        foreach ($cart->items as $item) {
-            OrderItem::create([
-                'order_id' => $order->id,
-                'product_id' => $item->product_id,
-                'quantity' => $item->quantity,
-                'price' => $item->product->price,
-            ]);
-        }
-
-        // 4. حذف آیتم‌های سبد خرید و خود سبد
-        $cart->items()->delete();
-        $cart->delete();
-
-        return redirect()->route('orders.show', $order->id)
-            ->with('success', 'سفارش شما با موفقیت ثبت شد ✅');
     }
 }

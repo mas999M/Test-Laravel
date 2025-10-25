@@ -11,11 +11,12 @@ Route::middleware('auth')->get('/m' , [\App\Http\Controllers\PayController::clas
 Route::middleware('auth')->get('/add/{id}' , [\App\Http\Controllers\PayController::class , 'add'])->name('add');
 Route::middleware('auth')->get('/cart' , [\App\Http\Controllers\PayController::class , 'cart'])->name('cart');
 Route::middleware('auth')->get('/checkout', [\App\Http\Controllers\PayController::class, 'checkout'])->name('checkout');
+Route::get('verify',[\App\Http\Controllers\PayController::class , 'verify'])->name('verify');
 
 // برای نمایش سفارش
-Route::get('/orders/{order}', function (\App\Models\Order $orders) {
-    return view('order-show', compact('orders'));
-})->name('orders.show');
+//Route::get('/orders/{order}', function (\App\Models\Order $orders) {
+//    return view('order-show', compact('orders'));
+//})->name('orders.show');
 
 
 Route::get('/dashboard', function () {
