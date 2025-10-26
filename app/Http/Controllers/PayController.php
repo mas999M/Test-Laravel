@@ -67,72 +67,116 @@ class PayController extends Controller
         $cartitems = CartItem::where('cart_id', $cart->id)->get();
 
         return view('cart', compact('cart', 'cartitems'));
+
     }
 
-    // 💳 تسویه حساب (پرداخت)
+
+
+
     public function checkout()
     {
-        // Do all things together in a single line.
+        $cart = Cart::where('user_id', Auth::id())->first();
+
+        if (!$cart) {
+            return view('cart', ['cart' => null, 'cartitems' => []]);
+        }
+
+        // محاسبه مبلغ کل
+        $total = 0;
+        foreach ($cart->items as $item) {
+            $total += $item->product->price * $item->quantity;
+        }
+
+        // ساخت سفارش
+        $order = Order::create([
+            'user_id' => Auth::id(),
+            'total' => $total,
+            'status' => 'pending',
+        ]);
+
+        // ساخت رکورد پرداخت
+        $payment = \App\Models\Payment::create([
+            'order_id' => $order->id,
+            'transaction_id' => '0',
+            'reference_id' => '0',
+            'amount' => (int)$total,
+            'status' => 'pending',
+            'gateway' => 'zarinpal',
+        ]);
+
+        // ثبت آیتم‌های سفارش
+        foreach ($cart->items as $cartItem) {
+            OrderItem::create([
+                'order_id' => $order->id,
+                'product_id' => $cartItem->product_id,
+                'quantity' => $cartItem->quantity,
+            ]);
+        }
+
+        // حذف سبد خرید بعد از ساخت سفارش
+        $cart->items()->delete();
+        $cart->delete();
+
+        $amount = (int)$total;
+
+        // ذخیره order_id در session برای مرحله‌ی verify
+        session()->put('order_id', $order->id);
+        session()->put('amount', $amount);
+
+        // شروع فرآیند پرداخت
         return Payment::callbackUrl(route('verify'))->purchase(
-            (new Invoice)->amount(1000),
-            function($driver, $transactionId) {
-                session()->put('re' , $transactionId);
+            (new Invoice)->amount($amount),
+            function ($driver, $transactionId) use ($order, $payment) {
+                // زمانی که درگاه transaction_id برمی‌گردونه
+                $order->update(['transaction_id' => $transactionId]);
+                $payment->update(['transaction_id' => $transactionId]);
             }
         )->pay()->render();
-//        $cart = Cart::where('user_id', Auth::id())->with('items.product')->first();
-//
-//        if (!$cart || $cart->items->isEmpty()) {
-//            return redirect()->back()->with('error', 'سبد خرید شما خالی است 🛒');
-//        }
-//
-//        // 1. محاسبه مبلغ کل
-//        $total = 0;
-//        foreach ($cart->items as $item) {
-//            $total += $item->product->price * $item->quantity;
-//        }
-//
-//        // 2. ساخت سفارش جدید
-//        $order = Order::create([
-//            'user_id' => Auth::id(),
-//            'total' => $total,
-//            'status' => 'pending', // بعداً می‌تونه paid بشه
-//        ]);
-//
-//        // 3. کپی کردن آیتم‌ها از CartItem به OrderItem
-//        foreach ($cart->items as $item) {
-//            OrderItem::create([
-//                'order_id' => $order->id,
-//                'product_id' => $item->product_id,
-//                'quantity' => $item->quantity,
-//                'price' => $item->product->price,
-//            ]);
-//        }
-//
-//        // 4. حذف آیتم‌های سبد خرید و خود سبد
-//        $cart->items()->delete();
-//        $cart->delete();
-//
-//        return redirect()->route('orders.show', $order->id)
-//            ->with('success', 'سفارش شما با موفقیت ثبت شد ✅');
     }
+
     public function verify()
     {
-        $transactionId = session('re');
+        $orderId = session()->get('order_id');
+        $amount = session()->get('amount');
+
+        if (!$orderId || !$amount) {
+            return 'اطلاعات تراکنش یافت نشد.';
+        }
+
+        $order = Order::find($orderId);
+        $payment = \App\Models\Payment::where('order_id', $orderId)->first();
+
         try {
+            // بررسی و تأیید پرداخت از درگاه
+            $receipt = Payment::amount($amount)
+                ->transactionId($order->transaction_id)
+                ->verify();
 
-            $receipt = Payment::amount(1000)->transactionId($transactionId)->verify();
+            // اگر بدون خطا بود یعنی پرداخت موفق است
+            $order->update([
+                'status' => 'success',
+            ]);
 
-            // You can show payment referenceId to the user.
+            $payment->update([
+                'status' => 'success',
+                'reference_id' => $receipt->getReferenceId(),
+            ]);
+
             echo $receipt->getReferenceId();
 
-
         } catch (InvalidPaymentException $exception) {
-            /**
-            when payment is not verified, it will throw an exception.
-            We can catch the exception to handle invalid payments.
-            getMessage method, returns a suitable message that can be used in user interface.
-             **/
+            // در صورت خطا در تأیید پرداخت
+            $order->update([
+                'status' => 'failed',
+            ]);
+
+            $payment->update([
+                'status' => 'failed',
+            ]);
+
             echo $exception->getMessage();
         }
     }
+
+
 }
