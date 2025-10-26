@@ -15,7 +15,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->decimal('total', 15, 2)->default(0);
-            $table->string('status')->default('pending'); // وضعیت سفارش
+            $table->enum('status', ['pending','success','failed'])->default('pending');
+            $table->string('transaction_id')->nullable();
             $table->timestamps(); // 👈 این خط رو فراموش نکن
         });
 
